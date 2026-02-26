@@ -55,70 +55,16 @@ The application follows a modular microservice architecture.
 Below are key diagrams and visuals illustrating the MBTI Chatbot architecture and workflow. All images are located in the `src/assets` folder:
 
 #### MBTI Chatbot Containerization and Deployment
-![Containerization and Deployment](src/assets/MBTI-Chatbot-Containerization-and-Deployment.png)
+![Containerization and Deployment](assets/MBTI-Chatbot-Containerization-and-Deployment.png)
 
 #### MBTI Chatbot Flow
-![Chatbot Flow](src/assets/MBTI-Chatbot-Flow.png)
+![Chatbot Flow](assets/MBTI-Chatbot-Flow.png)
 
 #### MBTI Chatbot Request Processing Flow
-![Request Processing Flow](src/assets/MBTI-Chatbot-Request-Processing-Flow.png)
+![Request Processing Flow](assets/MBTI-Chatbot-Request-Processing-Flow.png)
 
 #### MBTI Chatbot Service Level
-![Service Level](src/assets/MBTI-Chatbot-Service-Level.png)
-
----
-
-### High-Level Flow
-
-```mermaid
-graph TD
-    A[User] -->|Interacts| B[React Client]
-    B -->|REST API| C[Node.js/Express Server]
-    C -->|Model Request| D[ML Model Service (Python)]
-    C -->|Database Ops| E[MongoDB Atlas]
-    C -->|External AI| F[HuggingFace / Gemini APIs]
-    D -->|Prediction Response| C
-    C -->|JSON Response| B
-```
-
----
-
-### Service Breakdown
-
-```mermaid
-flowchart TD
-    subgraph Frontend
-        A1[React SPA]
-    end
-
-    subgraph Backend
-        B1[Express API Layer]
-        B2[Auth Controller]
-        B3[Chat Controller]
-        B4[User Controller]
-        B5[Translation Service]
-        B6[Summarization Service]
-    end
-
-    subgraph ML_Service
-        C1[Python Model API]
-        C2[MBTI Classification Model]
-    end
-
-    subgraph Database
-        D1[MongoDB Atlas]
-    end
-
-    A1 --> B1
-    B1 --> B2
-    B1 --> B3
-    B1 --> B4
-    B1 --> B5
-    B1 --> B6
-    B1 --> C1
-    C1 --> C2
-    B1 --> D1
-```
+![Service Level](assets/MBTI-Chatbot-Service-Level.png)
 
 ---
 
@@ -243,6 +189,7 @@ http://localhost:3000
 
 ## 📁 Project Structure
 
+```
 MBTI-Chatbot/
 │
 ├── src/
@@ -252,6 +199,7 @@ MBTI-Chatbot/
 │   └── assets/        # Architecture diagrams
 │
 └── README.md
+```
 
 - Independent ML inference service
 - Stateless backend design
