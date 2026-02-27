@@ -1,12 +1,26 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import tensorflow as tf
-from transformers import AutoTokenizer
 import numpy as np
 import re
 import os
 import google.generativeai as genai
 import nltk
+
+try:
+    import tensorflow as tf
+except Exception:
+    tf = None
+
+try:
+    import torch
+except Exception:
+    torch = None
+
+try:
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+except Exception:
+    AutoTokenizer = None
+    AutoModelForSequenceClassification = None
 
 # Download NLTK data if needed
 try:
@@ -20,6 +34,7 @@ CORS(app)
 # Global variables for model and tokenizer
 model = None
 tokenizer = None
+USE_LIGHTWEIGHT_MBTI = os.getenv("USE_LIGHTWEIGHT_MBTI", "true").lower() == "true"
 
 # Configure Gemini from environment
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -34,10 +49,6 @@ else:
 MAX_SEQ_LEN = 128
 MBERT_MODEL_NAME = "bert-base-multilingual-cased"
 
-# Add these imports at the top of your app.py
-import torch
-import numpy as np
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import logging
 
 # Set up logging to handle warnings
@@ -597,6 +608,13 @@ def load_mbert_model():
     global model, tokenizer
     
     try:
+        if tf is None:
+            print("⚠️ TensorFlow not available; skipping mBERT model load.")
+            return False
+        if AutoTokenizer is None:
+            print("⚠️ Transformers not available; skipping mBERT model load.")
+            return False
+
         # Load your trained mBERT model
         model_path = os.path.join(os.path.dirname(__file__), 'mbert_mbti_model', 'complete_model')
         model = tf.keras.models.load_model(model_path)
@@ -611,6 +629,73 @@ def load_mbert_model():
         print("Expected model structure:")
         print("mbert_mbti_model/complete_model/ (TensorFlow SavedModel format)")
         return False
+
+def _clamp01(value):
+    return max(0.0, min(1.0, value))
+
+def predict_personality_lightweight(text):
+    """Keyword-based lightweight MBTI predictor for free-tier deployments."""
+    cleaned_text = preprocess_text(text)
+    words = cleaned_text.split()
+    if not words:
+        return {
+            'mbti': 'INTP',
+            'confidence': 0.25,
+            'probabilities': {'E_I': 0.45, 'S_N': 0.35, 'F_T': 0.40, 'P_J': 0.55},
+            'dimensions': {'Extraversion': 0.45, 'Sensing': 0.35, 'Feeling': 0.40, 'Perceiving': 0.55},
+        }
+
+    axis_keywords = {
+        'E': {'team', 'people', 'talk', 'network', 'group', 'social', 'outgoing'},
+        'I': {'alone', 'focus', 'quiet', 'reflect', 'independent', 'deep', 'introvert'},
+        'S': {'practical', 'details', 'facts', 'routine', 'concrete', 'realistic'},
+        'N': {'ideas', 'future', 'possibilities', 'creative', 'abstract', 'vision'},
+        'F': {'feel', 'care', 'values', 'empathy', 'emotion', 'support', 'kind'},
+        'T': {'logic', 'analysis', 'objective', 'reason', 'efficiency', 'data'},
+        'P': {'flexible', 'explore', 'adapt', 'spontaneous', 'open', 'curious'},
+        'J': {'plan', 'schedule', 'organized', 'deadline', 'structure', 'decide'},
+    }
+
+    counts = {k: 0 for k in axis_keywords}
+    for token in words:
+        for axis, keywords in axis_keywords.items():
+            if token in keywords:
+                counts[axis] += 1
+
+    total_tokens = max(1, len(words))
+    bias = {
+        'E': 0.46, 'S': 0.42, 'F': 0.45, 'P': 0.54
+    }
+
+    e_prob = _clamp01(bias['E'] + (counts['E'] - counts['I']) / (2 * total_tokens))
+    s_prob = _clamp01(bias['S'] + (counts['S'] - counts['N']) / (2 * total_tokens))
+    f_prob = _clamp01(bias['F'] + (counts['F'] - counts['T']) / (2 * total_tokens))
+    p_prob = _clamp01(bias['P'] + (counts['P'] - counts['J']) / (2 * total_tokens))
+
+    mbti_type = (
+        ('E' if e_prob > 0.5 else 'I') +
+        ('S' if s_prob > 0.5 else 'N') +
+        ('F' if f_prob > 0.5 else 'T') +
+        ('P' if p_prob > 0.5 else 'J')
+    )
+    confidence = float(np.mean([abs(e_prob - 0.5), abs(s_prob - 0.5), abs(f_prob - 0.5), abs(p_prob - 0.5)]) * 2)
+
+    return {
+        'mbti': mbti_type,
+        'confidence': confidence,
+        'probabilities': {
+            'E_I': float(e_prob),
+            'S_N': float(s_prob),
+            'F_T': float(f_prob),
+            'P_J': float(p_prob),
+        },
+        'dimensions': {
+            'Extraversion': float(e_prob),
+            'Sensing': float(s_prob),
+            'Feeling': float(f_prob),
+            'Perceiving': float(p_prob),
+        },
+    }
 
 def preprocess_text(text):
     """Clean and preprocess input text"""
@@ -726,20 +811,18 @@ def predict():
                 'mbti': 'UNKNOWN'
             }), 400
         
-        # Predict personality using mBERT
+        # Predict personality using mBERT when available, otherwise lightweight fallback.
         print(text)
+        model_used = 'mBERT'
         result = predict_personality_mbert(text)
-        
         if result is None:
-            return jsonify({
-                'error': 'mBERT model not loaded',
-                'mbti': 'UNKNOWN'
-            }), 500
+            result = predict_personality_lightweight(text)
+            model_used = 'lightweight'
         
         # Add additional information to result
         result['original_text'] = text
         result['processed_text'] = preprocess_text(text)
-        result['model_type'] = 'mBERT'
+        result['model_type'] = model_used
         
         return jsonify(result)
         
@@ -868,27 +951,37 @@ def health_check():
     """Health check endpoint"""
     model_status = "loaded" if model is not None else "not_loaded"
     tokenizer_status = "loaded" if tokenizer is not None else "not_loaded"
+    mbti_mode = "mbert" if model is not None else ("lightweight" if USE_LIGHTWEIGHT_MBTI else "unavailable")
     
     return jsonify({
         'status': 'healthy',
         'model_status': model_status,
         'tokenizer_status': tokenizer_status,
         'model_type': 'mBERT',
-        'gemini_status': 'configured' if gemini_model else 'not_configured'
+        'gemini_status': 'configured' if gemini_model else 'not_configured',
+        'mbti_mode': mbti_mode
     })
 
 @app.route('/ready', methods=['GET'])
 def ready_check():
     """Readiness endpoint requiring model load completion."""
+    if USE_LIGHTWEIGHT_MBTI:
+        return jsonify({'status': 'ready', 'mode': 'lightweight'})
     if model is None or tokenizer is None:
-        return jsonify({'status': 'not_ready'}), 503
+        return jsonify({'status': 'not_ready', 'mode': 'mbert'}), 503
     return jsonify({'status': 'ready'})
 
 @app.route('/model_info', methods=['GET'])
 def model_info():
     """Get model information"""
     if model is None:
-        return jsonify({'error': 'mBERT model not loaded'}), 500
+        return jsonify({
+            'model_type': 'Lightweight keyword MBTI fallback',
+            'max_sequence_length': MAX_SEQ_LEN,
+            'supported_languages': ['English', 'Kannada'],
+            'mbti_dimensions': ['E/I', 'S/N', 'F/T', 'P/J'],
+            'note': 'mBERT model not loaded; using fallback predictor.'
+        })
     
     try:
         return jsonify({
@@ -913,11 +1006,16 @@ if __name__ == '__main__':
     if success:
         print("✅ mBERT model loaded successfully!")
         print("🌐 Server starting on http://localhost:5001")
-        app.run(host='0.0.0.0', port=5001, debug=False)
+        app.run(host='0.0.0.0', port=int(os.getenv("PORT", "5001")), debug=False)
     else:
-        print("❌ Failed to load mBERT model. Please check your model files.")
-        print("📋 Make sure you have:")
-        print("   1. mbert_mbti_model/complete_model/ directory")
-        print("   2. TensorFlow SavedModel files inside")
-        print("   3. Proper file permissions")
-        exit(1)
+        if USE_LIGHTWEIGHT_MBTI:
+            print("⚠️ Falling back to lightweight MBTI predictor.")
+            print("🌐 Server starting on http://localhost:5001")
+            app.run(host='0.0.0.0', port=int(os.getenv("PORT", "5001")), debug=False)
+        else:
+            print("❌ Failed to load mBERT model. Please check your model files.")
+            print("📋 Make sure you have:")
+            print("   1. mbert_mbti_model/complete_model/ directory")
+            print("   2. TensorFlow SavedModel files inside")
+            print("   3. Proper file permissions")
+            exit(1)
