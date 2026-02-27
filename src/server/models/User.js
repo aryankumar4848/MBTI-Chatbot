@@ -40,6 +40,11 @@ const userSchema = new mongoose.Schema({
     chatInteractions: [{
         timestamp: { type: Date, default: Date.now },
         message: String,
+        role: {
+            type: String,
+            enum: ['user', 'assistant'],
+            default: 'user'
+        },
         sentiment: Number,
         language: { // Can also track per-message language if needed
             type: String,

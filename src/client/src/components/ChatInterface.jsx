@@ -5,6 +5,8 @@ import axios from 'axios';
 import TextareaAutosize from 'react-textarea-autosize';
 import { useTranslation } from 'react-i18next';
 const BOT_AVATAR = '/bot-avatar.png';
+const API_BASE_URL = (process.env.REACT_APP_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+const ML_BASE_URL = (process.env.REACT_APP_ML_URL || 'http://localhost:5001').replace(/\/$/, '');
 // Add this after your imports and before the ChatInterface component
 const shouldAnalyzeEmotion = (message) => {
     const basicQueries = [
@@ -41,7 +43,7 @@ const EnhancedContextDetector = {
     detectContext: async (message) => {
         try {
             // Call the transformer-based emotion analysis
-            const response = await axios.post('http://localhost:5001/analyze_emotion', {
+            const response = await axios.post(`${ML_BASE_URL}/analyze_emotion`, {
                 text: message
             });
 
@@ -83,6 +85,8 @@ const ChatInterface = ({ user }) => {
     const [previousContext, setPreviousContext] = useState('normal');
     const [currentContext, setCurrentContext] = useState('normal');
     const [isLoading, setIsLoading] = useState(false);
+    const [responseMode, setResponseMode] = useState('balanced');
+    const [aiMode, setAiMode] = useState('adaptive');
     const [emotionContext, setEmotionContext] = useState({
     current: 'normal',
     confidence: 0.0,
@@ -230,7 +234,7 @@ const ChatInterface = ({ user }) => {
         const fetchUserMbti = async () => {
             try {
                 const token = localStorage.getItem("token");
-                const res = await axios.get('http://localhost:5000/api/user/profile', {
+                const res = await axios.get(`${API_BASE_URL}/api/user/profile`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 const mbti = res.data?.psychology?.mbti;
@@ -324,34 +328,33 @@ const ChatInterface = ({ user }) => {
         
         // Store user message
         await axios.post(
-            'http://localhost:5000/api/chat/analyze',
-            { message: userMessage },
+            `${API_BASE_URL}/api/chat/analyze`,
+            { message: userMessage, role: 'user' },
             { headers: { Authorization: `Bearer ${token}` } }
         );
 
-        // Get chat history
-        const historyRes = await axios.get('http://localhost:5000/api/chat/history', {
-            headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        const recent = Array.isArray(historyRes.data) ? historyRes.data.slice(-5) : [];
-        const chatHistoryForGemini = recent.map(entry => ({
-            user: entry.message,
-            bot: ""
-        }));
+        const localHistory = [...chatHistory, userEntry]
+            .filter((entry) => !entry.isAdaptation)
+            .slice(-10)
+            .map((entry) => ({
+                role: entry.isUser ? 'user' : 'assistant',
+                text: entry.message
+            }));
 
         // Enhanced API call with language parameter
-        const geminiRes = await axios.post('http://localhost:5001/enhanced_adaptive_generate', {
+        const geminiRes = await axios.post(`${ML_BASE_URL}/enhanced_adaptive_generate`, {
             user_query: userMessage,
             user_personality: userMbti,
-            chat_history: chatHistoryForGemini,
+            chat_history: localHistory,
             context_data: contextData,
-            user_language: selectedLanguage
+            user_language: selectedLanguage,
+            response_mode: responseMode
         });
 
         const botMessage = geminiRes.data.response;
         const adaptationInfo = geminiRes.data.adaptation_info;
         const emotionAnalysis = geminiRes.data.emotion_analysis;
+        setAiMode(geminiRes.data.fallback_used ? 'fallback' : 'adaptive');
         
         const botEntry = {
             isUser: false,
@@ -364,8 +367,8 @@ const ChatInterface = ({ user }) => {
 
         // Store bot response
         await axios.post(
-            'http://localhost:5000/api/chat/analyze',
-            { message: botMessage },
+            `${API_BASE_URL}/api/chat/analyze`,
+            { message: botMessage, role: 'assistant' },
             { headers: { Authorization: `Bearer ${token}` } }
         );
 
@@ -442,14 +445,14 @@ const ChatInterface = ({ user }) => {
             const token = localStorage.getItem("token");
             const combinedText = combineAnswersForDatasetStyle(questions, answers);
 
-            const mbtiResponse = await axios.post('http://localhost:5001/predict', {
+            const mbtiResponse = await axios.post(`${ML_BASE_URL}/predict`, {
                 text: combinedText
             });
 
             const mbti = mbtiResponse.data.mbti;
             const confidence = mbtiResponse.data.confidence;
 
-            await axios.post("http://localhost:5000/api/chat/update-mbti", {
+            await axios.post(`${API_BASE_URL}/api/chat/update-mbti`, {
                 mbti: mbti
             }, {
                 headers: { Authorization: `Bearer ${token}` }
@@ -534,6 +537,7 @@ const ChatInterface = ({ user }) => {
                     {userMbti && (
                         <div className="personality-status">
                             <span className="mbti-badge">{userMbti}</span>
+                            <span className="context-indicator">{aiMode === 'fallback' ? 'Local mode' : 'Gemini mode'}</span>
                             {currentContext !== 'normal' && (
                                 <span className="context-indicator">🔄 {currentContext.replace('_', ' ')}</span>
                             )}
@@ -569,6 +573,23 @@ const ChatInterface = ({ user }) => {
                 <div ref={chatEndRef} />
             </div>
             <div className="message-input-fixed">
+                <select
+                    value={responseMode}
+                    onChange={(e) => setResponseMode(e.target.value)}
+                    style={{
+                        width: '120px',
+                        height: '40px',
+                        borderRadius: '12px',
+                        border: '1px solid #d0d0d0',
+                        marginRight: '8px',
+                        padding: '0 8px',
+                        backgroundColor: '#fff'
+                    }}
+                >
+                    <option value="brief">Brief</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="detailed">Detailed</option>
+                </select>
                 <textarea
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}

@@ -2,7 +2,6 @@ const express = require('express');
 const chatController = require('../controllers/chatController');
 const auth = require('../middleware/auth');
 const router = express.Router();
-console.log('chatController:', chatController);
 
 // POST /api/chat/analyze - Analyze message and store interaction
 router.post('/analyze', auth, chatController.analyze);

@@ -1,0 +1,55 @@
+services:
+  mlmodel:
+    build:
+      context: ./src/MLmodel
+    image: mbti-mlmodel:latest
+    container_name: mbti-mlmodel
+    env_file:
+      - ./src/server/.env
+    ports:
+      - "5001:5001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5001/ready', timeout=3).getcode()==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  server:
+    build:
+      context: ./src/server
+    image: mbti-server:latest
+    container_name: mbti-server
+    env_file:
+      - ./src/server/.env
+    ports:
+      - "5000:5000"
+    depends_on:
+      mlmodel:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  client:
+    build:
+      context: ./src/client
+    image: mbti-client:latest
+    container_name: mbti-client
+    ports:
+      - "3000:3000"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 10s

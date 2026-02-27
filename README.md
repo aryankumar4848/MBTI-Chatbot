@@ -118,16 +118,19 @@ cd MBTI-Chatbot
 Place the MBTI model file inside:
 
 ```
-MLmodel/
+src/MLmodel/mbert_mbti_model/complete_model/
 ```
 
-Model files are excluded from version control due to size constraints.
+Expected files include:
+- `saved_model.pb`
+- `variables/variables.data-00000-of-00001`
+- `variables/variables.index`
 
 ---
 
 ### 3️⃣ Configure Environment Variables
 
-Create a `.env` file inside `server/`:
+Create a `.env` file inside `src/server/` (or copy from `src/server/.env.example`):
 
 ```env
 MONGO_URI=your_mongodb_connection_string
@@ -143,24 +146,42 @@ GEMINI_API_KEY=your_key
 
 ## 🐳 Dockerized Deployment
 
-From the project root:
+### Option A: One-command startup (recommended)
+
+```bash
+./scripts/start.sh
+```
+
+Stop:
+```bash
+./scripts/stop.sh
+```
+
+Status:
+```bash
+./scripts/status.sh
+```
+
+### Option B: Manual Docker commands
+
+From the project root (`MBTI-Chatbot/`):
 
 ### Client
 ```bash
-docker build -t mbti-client ./client
-docker run -d -p 3000:3000 mbti-client
+docker build -t mbti-client ./src/client
+docker run -d --name mbti-client -p 3000:3000 mbti-client
 ```
 
 ### Server
 ```bash
-docker build -t mbti-server ./server
-docker run -d -p 5000:5000 mbti-server
+docker build -t mbti-server ./src/server
+docker run -d --name mbti-server -p 5000:5000 --env-file ./src/server/.env mbti-server
 ```
 
 ### ML Model Service
 ```bash
-docker build -t mbti-mlmodel ./MLmodel
-docker run -d -p 5001:5001 mbti-mlmodel
+docker build -t mbti-mlmodel ./src/MLmodel
+docker run -d --name mbti-mlmodel -p 5001:5001 --env-file ./src/server/.env mbti-mlmodel
 ```
 
 ---

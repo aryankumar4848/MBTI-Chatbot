@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 
+const API_BASE_URL = (process.env.REACT_APP_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+
 const Auth = ({ setUser }) => {
     const { t } = useTranslation();
     const [isSignup, setIsSignup] = useState(false);
@@ -35,8 +37,8 @@ const Auth = ({ setUser }) => {
 
         try {
             const endpoint = isSignup
-                ? 'http://localhost:5000/api/auth/signup'
-                : 'http://localhost:5000/api/auth/login';
+                ? `${API_BASE_URL}/api/auth/signup`
+                : `${API_BASE_URL}/api/auth/login`;
             
             // Include selected language in the request
             const requestData = {

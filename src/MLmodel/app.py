@@ -21,9 +21,14 @@ CORS(app)
 model = None
 tokenizer = None
 
-# 🔐 Set your Gemini API key
-genai.configure(api_key="AIzaSyAW6jtqfPOdYZw47DKGldo0jCTdE3V7RN8")
-gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+# Configure Gemini from environment
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+gemini_model = None
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+else:
+    print("Warning: GEMINI_API_KEY is not set. Gemini-based routes will fail.")
 
 # Model configuration
 MAX_SEQ_LEN = 128
@@ -354,6 +359,81 @@ except Exception as e:
     print(f"Failed to initialize emotion classifier: {e}")
     emotion_classifier = None
 
+# Basic fallback when Gemini is unavailable or quota-limited.
+def resolve_user_intent_text(query, chat_history):
+    query_text = (query or "").strip()
+    if len(query_text) >= 12:
+        return query_text
+
+    short_followups = {"ok", "okay", "do it", "go on", "continue", "yes", "sure"}
+    if query_text.lower() in short_followups:
+        for entry in reversed(chat_history or []):
+            if isinstance(entry, dict):
+                if entry.get("user"):
+                    return entry["user"]
+                if entry.get("role") == "user" and entry.get("text"):
+                    return entry["text"]
+    return query_text
+
+
+def build_fallback_response(query, context_data, user_language="en", chat_history=None, response_mode="balanced"):
+    primary = context_data.get("primary_context", "normal")
+    effective_query = resolve_user_intent_text(query, chat_history)
+    query_lower = effective_query.lower()
+    asks_for_plan = any(k in query_lower for k in ["plan", "do it", "roadmap", "schedule", "since i am unplaced", "what should i do"])
+
+    if user_language == "kn":
+        if asks_for_plan:
+            return (
+                "ಖಂಡಿತ. ಇಲ್ಲಿದೆ 7 ದಿನಗಳ ಪ್ಲಾನ್:\n"
+                "Day 1: ರೆಸ್ಯೂಮೆ 1 ಪುಟಕ್ಕೆ ತಿದ್ದುಪಡಿ + LinkedIn headline ಸರಿಪಡಿಸಿ.\n"
+                "Day 2: 5 ಕಂಪನಿಗಳಿಗೆ tailored ಅರ್ಜಿ + 2 referral requests.\n"
+                "Day 3: DSA (Arrays/Strings) 2 ಗಂಟೆ + 1 mock interview.\n"
+                "Day 4: ಒಂದು project story STAR format ನಲ್ಲಿ ಸಿದ್ಧಪಡಿಸಿ.\n"
+                "Day 5: 5 ಹೊಸ ಅರ್ಜಿಗಳು + aptitude practice.\n"
+                "Day 6: HR ಪ್ರಶ್ನೆಗಳು (Tell me about yourself, strengths) ತಯಾರಿ.\n"
+                "Day 7: review + weak areas fix + next-week target set.\n"
+                "ನೀವು ಬಯಸಿದರೆ Day 1 ಅನ್ನು ಈಗಲೇ ನಾನು breakdown ಮಾಡಿ ಕೊಡುತ್ತೇನೆ."
+            )
+        if primary in ("academic_pressure", "stress"):
+            return "ನೀವು ಎದುರಿಸುತ್ತಿರುವ ಒತ್ತಡ ನಿಜವಾಗಿಯೂ ಕಷ್ಟಕರವಾಗಿದೆ. ಈಗ 1) ನಿಮ್ಮ ರೆಸ್ಯೂಮೆ ಅನ್ನು ಒಂದು ಪುಟಕ್ಕೆ ಸ್ಪಷ್ಟವಾಗಿ ತಿದ್ದುಪಡಿ ಮಾಡಿ, 2) ಮುಂದಿನ 7 ದಿನಗಳಿಗೆ ದಿನಕ್ಕೆ 5 ಅರ್ಜಿಗಳ ಗುರಿ ಇಡಿ, 3) ಒಂದು ಸಣ್ಣ DSA/ಪ್ರಾಜೆಕ್ಟ್ ಮರುಪಾಠ ಯೋಜನೆ ಮಾಡಿ. ಬೇಕಿದ್ದರೆ ನಾನು ದಿನವಾರು ಪ್ಲಾನ್ ಮಾಡುತ್ತೇನೆ."
+        return "ನಿಮ್ಮ ಮಾತು ಅರ್ಥವಾಗಿದೆ. ನಾವು ಇದನ್ನು ಹಂತ ಹಂತವಾಗಿ ನಿಭಾಯಿಸೋಣ. ಈಗ ನಿಮ್ಮ ಪ್ರಮುಖ ಸಮಸ್ಯೆ ಯಾವುದು ಎಂದು ಒಂದು ವಾಕ್ಯದಲ್ಲಿ ಹೇಳಿ."
+
+    if asks_for_plan or response_mode == "detailed":
+        return (
+            "Absolutely. Here is a practical 7-day placement plan:\n"
+            "Day 1: Tighten resume to one page, quantify impact, update LinkedIn.\n"
+            "Day 2: Apply to 5 roles with tailored resume; send 2 referral messages.\n"
+            "Day 3: DSA prep (arrays/strings) 2 hours + 1 mock interview.\n"
+            "Day 4: Prepare 2 strong project stories using STAR format.\n"
+            "Day 5: Apply to 5 more roles + aptitude practice.\n"
+            "Day 6: HR prep (intro, strengths, weaknesses, why this role).\n"
+            "Day 7: Review misses, fix weak areas, set next-week targets.\n"
+            "If you want, I can now break down Day 1 into hour-by-hour tasks."
+        )
+    if primary in ("academic_pressure", "stress"):
+        return "What you are feeling is valid. Let us make this manageable: 1) tighten your resume to one focused page, 2) set a 7-day target of 5 applications per day, 3) do one interview prep block daily (DSA or project storytelling). If you want, I can create a day-by-day plan right now."
+    return "I hear you. Let us handle this step by step. Tell me the one biggest blocker right now, and I will help you with a focused plan."
+
+def basic_context_detection(text):
+    text_lower = (text or "").lower()
+    if any(k in text_lower for k in ["exam", "placement", "unplaced", "deadline", "pressure", "final year"]):
+        primary = "academic_pressure"
+    elif any(k in text_lower for k in ["anxious", "anxiety", "nervous", "scared"]):
+        primary = "social_anxiety"
+    elif any(k in text_lower for k in ["happy", "great", "excited", "good"]):
+        primary = "positive"
+    else:
+        primary = "normal"
+
+    return {
+        "detected_emotions": [("neutral", 0.6)],
+        "primary_context": primary,
+        "confidence": 0.6,
+        "all_contexts": {primary: 0.6},
+        "academic_boost": primary == "academic_pressure",
+    }
+
 # Update your enhanced_adaptive_generate route in app.py:
 
 @app.route('/enhanced_adaptive_generate', methods=['POST'])
@@ -365,15 +445,13 @@ def enhanced_adaptive_generate():
         base_mbti = data.get("user_personality", "")
         chat_history = data.get("chat_history", [])
         user_language = data.get("user_language", "en")  # Add this line
+        response_mode = data.get("response_mode", "balanced")
         
-        if not emotion_classifier:
-            return jsonify({
-                "error": "Emotion classifier not available",
-                "response": "I'm here to support you. Please try again."
-            }), 500
-        
-        # Enhanced context detection using transformer
-        context_data = emotion_classifier.detect_context(query)
+        # Enhanced context detection using transformer; fall back to keyword-based context.
+        if emotion_classifier:
+            context_data = emotion_classifier.detect_context(query)
+        else:
+            context_data = basic_context_detection(query)
         
         # Initialize enhanced adaptation engine
         adaptation_engine = EnhancedPersonalityAdaptationEngine()
@@ -381,8 +459,16 @@ def enhanced_adaptive_generate():
         # Adapt personality based on emotion-detected context
         adapted_traits = adaptation_engine.adapt_personality(base_mbti, context_data)
         
-        # Create chat history string
-        chat_string = "\n".join([f"User: {entry['user']}\nBot: {entry['bot']}" for entry in chat_history])
+        # Create chat history string (supports either {user, bot} pairs or {role, text} entries)
+        history_lines = []
+        for entry in chat_history:
+            if entry.get("user") is not None or entry.get("bot") is not None:
+                history_lines.append(f"User: {entry.get('user', '')}")
+                history_lines.append(f"Bot: {entry.get('bot', '')}")
+            elif entry.get("role") and entry.get("text"):
+                role = "User" if entry["role"] == "user" else "Bot"
+                history_lines.append(f"{role}: {entry['text']}")
+        chat_string = "\n".join(history_lines)
         
         # Create enhanced prompt with emotion data
         emotions_str = ", ".join([f"{emotion} ({prob:.2f})" for emotion, prob in context_data['detected_emotions']])
@@ -399,6 +485,12 @@ Examples of Kannada responses:
         else:
             language_instruction = "Respond in English."
         
+        mode_guidance = {
+            "brief": "Keep it concise: 60-100 words, 2-4 bullets max.",
+            "balanced": "Keep it practical: 120-180 words with clear action steps.",
+            "detailed": "Provide depth: 180-280 words with a day-by-day or step-by-step plan.",
+        }.get(response_mode, "Keep it practical: 120-180 words with clear action steps.")
+
         prompt = f"""
 You are an AI companion with adaptive personality responding to a university student.
 
@@ -429,9 +521,9 @@ ENHANCED ADAPTATION RULES:
 5. Adapt your {base_mbti} communication style to match their current emotional needs
 
 RESPONSE GUIDELINES:
-- Keep response under 120 words
+- {mode_guidance}
 - Be conversational, not lecture-style
-- Focus on 1-2 key points maximum
+- Give a concrete action plan with numbered steps when the user asks for a plan
 - Ask engaging follow-up questions
 - Use natural, friendly tone
 - RESPOND IN THE USER'S LANGUAGE ({user_language})
@@ -439,15 +531,26 @@ RESPONSE GUIDELINES:
 Generate a response that demonstrates this emotion-aware personality adaptation.
 """
         
-        # Generate response using Gemini
-        chat = gemini_model.start_chat()
-        response = chat.send_message(prompt)
+        # Generate response using Gemini; fall back locally on quota/key failures.
+        try:
+            if not gemini_model:
+                raise RuntimeError("GEMINI_API_KEY is missing or invalid")
+            chat = gemini_model.start_chat()
+            response = chat.send_message(prompt)
+            response_text = response.text.strip()
+            fallback_used = False
+        except Exception as gemini_error:
+            print(f"Gemini generation fallback: {gemini_error}")
+            response_text = build_fallback_response(query, context_data, user_language, chat_history, response_mode)
+            fallback_used = True
         
         return jsonify({
-            "response": response.text.strip(),
+            "response": response_text,
             "adaptation_info": adapted_traits.get('explanation', ''),
             "context_data": context_data,
             "adapted_traits": adapted_traits,
+            "fallback_used": fallback_used,
+            "response_mode": response_mode,
             "emotion_analysis": {
                 "detected_emotions": context_data['detected_emotions'],
                 "primary_context": context_data['primary_context'],
@@ -473,10 +576,10 @@ def analyze_emotion():
         data = request.get_json()
         text = data.get("text", "")
         
-        if not emotion_classifier:
-            return jsonify({"error": "Emotion classifier not available"}), 500
-        
-        context_data = emotion_classifier.detect_context(text)
+        if emotion_classifier:
+            context_data = emotion_classifier.detect_context(text)
+        else:
+            context_data = basic_context_detection(text)
         
         return jsonify({
             "emotions": context_data['detected_emotions'],
@@ -693,6 +796,12 @@ Personality-specific guidelines:
 - For Perceivers (P): Be flexible, keep options open
 """
 
+        if not gemini_model:
+            return jsonify({
+                "error": "GEMINI_API_KEY is missing or invalid",
+                "response": "I'm sorry, I'm having trouble generating a response right now."
+            }), 500
+
         chat = gemini_model.start_chat()
         response = chat.send_message(prompt)
 
@@ -736,6 +845,11 @@ def summarize():
 
         prompt += "\nProvide a personality summary (2-3 sentences):"
 
+        if not gemini_model:
+            return jsonify({
+                "error": "GEMINI_API_KEY is missing or invalid"
+            }), 500
+
         chat = gemini_model.start_chat()
         response = chat.send_message(prompt)
         summary_text = response.text.strip()
@@ -759,8 +873,16 @@ def health_check():
         'status': 'healthy',
         'model_status': model_status,
         'tokenizer_status': tokenizer_status,
-        'model_type': 'mBERT'
+        'model_type': 'mBERT',
+        'gemini_status': 'configured' if gemini_model else 'not_configured'
     })
+
+@app.route('/ready', methods=['GET'])
+def ready_check():
+    """Readiness endpoint requiring model load completion."""
+    if model is None or tokenizer is None:
+        return jsonify({'status': 'not_ready'}), 503
+    return jsonify({'status': 'ready'})
 
 @app.route('/model_info', methods=['GET'])
 def model_info():
@@ -791,7 +913,7 @@ if __name__ == '__main__':
     if success:
         print("✅ mBERT model loaded successfully!")
         print("🌐 Server starting on http://localhost:5001")
-        app.run(host='0.0.0.0', port=5001, debug=True)
+        app.run(host='0.0.0.0', port=5001, debug=False)
     else:
         print("❌ Failed to load mBERT model. Please check your model files.")
         print("📋 Make sure you have:")

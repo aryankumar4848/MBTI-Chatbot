@@ -1,0 +1,3 @@
+.venv/
+src/MLmodel/.ipynb_checkpoints/
+src/MLmodel/logs/
