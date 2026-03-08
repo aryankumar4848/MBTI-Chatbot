@@ -5,11 +5,6 @@
 ![React](https://img.shields.io/badge/React-Frontend-61DAFB)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-brightgreen)
 
-## 🎥 Demo
-
-🔗 Live Demo: _Coming Soon_  
-📹 Demo Video: _Add Loom/YouTube Link Here_
-
 
 
 An advanced AI-powered cognitive chatbot that integrates MBTI personality prediction, emotion-aware NLP, and contextual conversation management to deliver psychologically informed, personalized interactions.
